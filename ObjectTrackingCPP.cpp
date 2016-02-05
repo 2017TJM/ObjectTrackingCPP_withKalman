@@ -19,7 +19,7 @@ const cv::Scalar SCALAR_GREEN = cv::Scalar(0.0, 255.0, 0.0);
 const cv::Scalar SCALAR_RED = cv::Scalar(0.0, 0.0, 255.0);
 
 // function prototypes ////////////////////////////////////////////////////////////////////////////
-void matchBlobs(std::vector<Blob> &existingBlobs, std::vector<Blob> &currentFrameBlobs);
+void matchCurrentFrameBlobsToExistingBlobs(std::vector<Blob> &existingBlobs, std::vector<Blob> &currentFrameBlobs);
 void addBlobToExistingBlobs(Blob &currentFrameBlob, std::vector<Blob> &existingBlobs, int &intIndex);
 void addNewBlob(Blob &currentFrameBlob, std::vector<Blob> &existingBlobs);
 double distanceBetweenBlobs(Blob firstBlob, Blob secondBlob);
@@ -110,11 +110,10 @@ int main(void) {
 
         if (blnFirstFrame == true) {
             for (auto &currentFrameBlob : currentFrameBlobs) {
-                currentFrameBlob.vectorOfAllActualPoints.push_back(currentFrameBlob.ptCurrentCenter);
                 blobs.push_back(currentFrameBlob);
             }
         } else {
-            matchBlobs(blobs, currentFrameBlobs);
+            matchCurrentFrameBlobsToExistingBlobs(blobs, currentFrameBlobs);
         }
 
         cv::Mat imgContours(imgThresh.size(), CV_8UC3, SCALAR_BLACK);
@@ -154,16 +153,37 @@ int main(void) {
         chCheckForEscKey = cv::waitKey(1);
     }
 
-    cv::waitKey(0);
+    if (chCheckForEscKey != 27) {               // if the user did not press esc (i.e. we reached the end of the video)
+        cv::waitKey(0);                         // hold the windows open to allow the "end of video" message to show
+    }
+        // note that if the user did press esc, we don't need to hold the windows open, we can simply let the program end which will close the windows
 
     return(0);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-void matchBlobs(std::vector<Blob> &existingBlobs, std::vector<Blob> &currentFrameBlobs) {
+void matchCurrentFrameBlobsToExistingBlobs(std::vector<Blob> &existingBlobs, std::vector<Blob> &currentFrameBlobs) {
     
     for (auto &existingBlob : existingBlobs) {
         existingBlob.blnCurrentMatchFoundOrNewBlob = false;
+
+        int intNumPtsSoFar = existingBlob.actualCenterPositions.size();
+
+        cv::Mat matPredicted = existingBlob.kalmanFilter.predict();
+
+        cv::Point ptPredicted((int)matPredicted.at<float>(0), (int)matPredicted.at<float>(1));
+
+        cv::Mat matActualMousePosition(2, 1, CV_32F, cv::Scalar::all(0));
+
+        matActualMousePosition.at<float>(0, 0) = (float)existingBlob.actualCenterPositions[intNumPtsSoFar - 1].x;
+        matActualMousePosition.at<float>(1, 0) = (float)existingBlob.actualCenterPositions[intNumPtsSoFar - 1].y;
+
+        cv::Mat matCorrected = existingBlob.kalmanFilter.correct(matActualMousePosition);        // function correct() updates the predicted state from the measurement
+
+        cv::Point ptCorrected((int)matCorrected.at<float>(0), (int)matCorrected.at<float>(1));
+
+        existingBlob.predictedCenterPositions.push_back(ptPredicted);
+        existingBlob.correctedCenterPositions.push_back(ptCorrected);
     }
 
     for (auto &currentFrameBlob : currentFrameBlobs) {
@@ -182,8 +202,8 @@ void matchBlobs(std::vector<Blob> &existingBlobs, std::vector<Blob> &currentFram
             }
         }
 
-        if (dblLeastDistance < currentFrameBlob.dblDiagonalSize * 2.0) {
-            addBlobToExistingBlobs(currentFrameBlob, existingBlobs, intIndexOfLeastDistance); // !!!! compiler error for 2nd arg on this line !!!!!!!
+        if (dblLeastDistance < currentFrameBlob.dblDiagonalSize * 2.0) {                // !!!!!!! left off here, change to use prediction rather than distance !!!
+            addBlobToExistingBlobs(currentFrameBlob, existingBlobs, intIndexOfLeastDistance);
         } else {
             addNewBlob(currentFrameBlob, existingBlobs);
         }
@@ -194,7 +214,6 @@ void matchBlobs(std::vector<Blob> &existingBlobs, std::vector<Blob> &currentFram
         if (existingBlob.blnCurrentMatchFoundOrNewBlob == false) {
             existingBlob.blnStillBeingTracked = false;
         }
-
     }
 
 }
@@ -204,11 +223,15 @@ void addBlobToExistingBlobs(Blob &currentFrameBlob, std::vector<Blob> &existingB
     
     existingBlobs[intIndex].contour = currentFrameBlob.contour;
     existingBlobs[intIndex].boundingRect = currentFrameBlob.boundingRect;
+
     existingBlobs[intIndex].ptCurrentCenter = currentFrameBlob.ptCurrentCenter;
+
+    existingBlobs[intIndex].actualCenterPositions.push_back(existingBlobs[intIndex].ptCurrentCenter);
+
     existingBlobs[intIndex].dblDiagonalSize = currentFrameBlob.dblDiagonalSize;
     existingBlobs[intIndex].dblAspectRatio = currentFrameBlob.dblAspectRatio;
     
-    existingBlobs[intIndex].vectorOfAllActualPoints.push_back(currentFrameBlob.ptCurrentCenter);
+    //existingBlobs[intIndex].vectorOfAllActualPoints.push_back(currentFrameBlob.ptCurrentCenter);
     
     existingBlobs[intIndex].blnStillBeingTracked = true;
     existingBlobs[intIndex].blnCurrentMatchFoundOrNewBlob = true;
@@ -216,7 +239,7 @@ void addBlobToExistingBlobs(Blob &currentFrameBlob, std::vector<Blob> &existingB
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void addNewBlob(Blob &currentFrameBlob, std::vector<Blob> &existingBlobs) {
-    currentFrameBlob.vectorOfAllActualPoints.push_back(currentFrameBlob.ptCurrentCenter);
+    //currentFrameBlob.vectorOfAllActualPoints.push_back(currentFrameBlob.ptCurrentCenter);
     currentFrameBlob.blnCurrentMatchFoundOrNewBlob = true;
 
     existingBlobs.push_back(currentFrameBlob);
